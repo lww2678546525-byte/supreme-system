@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProTrader - 交易复盘控制台</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gray: { 900: '#0f172a', 800: '#1e293b', 700: '#334155' },
+                        tradeWin: '#10b981', // 绿色
+                        tradeLoss: '#ef4444', // 红色
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .number-font { font-family: 'Roboto Mono', monospace; } /* 数字专用字体 */
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 h-screen flex overflow-hidden">
+
+<div id="app" class="flex w-full h-full">
+
+    <aside class="w-64 bg-gray-800 border-r border-gray-700 flex flex-col justify-between">
+        <div>
+            <div class="h-16 flex items-center justify-center border-b border-gray-700">
+                <h1 class="text-xl font-bold tracking-wider text-white"><i class="fa-solid fa-chart-line mr-2"></i>PRO<span class="text-blue-500">TRADER</span></h1>
+            </div>
+            <nav class="mt-6 px-4 space-y-2">
+                <a @click="currentView = 'dashboard'" :class="{'bg-blue-600 text-white': currentView==='dashboard', 'hover:bg-gray-700': currentView!=='dashboard'}" class="flex items-center px-4 py-3 rounded-lg cursor-pointer transition">
+                    <i class="fa-solid fa-gauge mr-3 w-5"></i> 仪表盘 (Dashboard)
+                </a>
+                <a @click="currentView = 'journal'" :class="{'bg-blue-600 text-white': currentView==='journal', 'hover:bg-gray-700': currentView!=='journal'}" class="flex items-center px-4 py-3 rounded-lg cursor-pointer transition">
+                    <i class="fa-solid fa-list mr-3 w-5"></i> 交易日志 (Table)
+                </a>
+                <a @click="currentView = 'kanban'" :class="{'bg-blue-600 text-white': currentView==='kanban', 'hover:bg-gray-700': currentView!=='kanban'}" class="flex items-center px-4 py-3 rounded-lg cursor-pointer transition">
+                    <i class="fa-solid fa-columns mr-3 w-5"></i> 计划看板 (Kanban)
+                </a>
+                <a @click="currentView = 'analytics'" :class="{'bg-blue-600 text-white': currentView==='analytics', 'hover:bg-gray-700': currentView!=='analytics'}" class="flex items-center px-4 py-3 rounded-lg cursor-pointer transition">
+                    <i class="fa-solid fa-chart-pie mr-3 w-5"></i> 深度统计 (Analytics)
+                </a>
+            </nav>
+        </div>
+        <div class="p-4 border-t border-gray-700">
+            <button @click="showAddModal = true" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded shadow-lg transition font-bold">
+                <i class="fa-solid fa-plus mr-2"></i> 记录交易
+            </button>
+        </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col overflow-hidden relative">
+        <header class="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-8">
+            <h2 class="text-lg font-semibold text-gray-100 capitalize">{{ viewName }}</h2>
+            <div class="flex items-center space-x-6">
+                <div class="flex flex-col text-right">
+                    <span class="text-xs text-gray-400">当前净值</span>
+                    <span class="text-lg font-bold number-font text-white">${{ formatNumber(accountBalance) }}</span>
+                </div>
+                <div class="flex flex-col text-right">
+                    <span class="text-xs text-gray-400">本月盈亏</span>
+                    <span :class="monthlyPL >= 0 ? 'text-tradeWin' : 'text-tradeLoss'" class="text-lg font-bold number-font">
+                        {{ monthlyPL >= 0 ? '+' : '' }}{{ formatNumber(monthlyPL) }}
+                    </span>
+                </div>
+                <div class="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center border border-gray-600">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-y-auto p-8 bg-gray-900">
+            
+            <div v-show="currentView === 'dashboard'" class="grid grid-cols-12 gap-6">
+                <div class="col-span-3 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                    <div class="text-gray-400 text-sm mb-1">总交易次数</div>
+                    <div class="text-3xl font-bold number-font">{{ trades.length }}</div>
+                </div>
+                <div class="col-span-3 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                    <div class="text-gray-400 text-sm mb-1">胜率 (Win Rate)</div>
+                    <div class="text-3xl font-bold number-font text-blue-400">{{ winRate }}%</div>
+                </div>
+                <div class="col-span-3 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                    <div class="text-gray-400 text-sm mb-1">平均盈亏比 (Avg R:R)</div>
+                    <div class="text-3xl font-bold number-font">{{ avgRR }}</div>
+                </div>
+                <div class="col-span-3 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                    <div class="text-gray-400 text-sm mb-1">最大回撤</div>
+                    <div class="text-3xl font-bold number-font text-tradeLoss">-5.2%</div>
+                </div>
+
+                <div class="col-span-8 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg h-96">
+                    <h3 class="text-gray-300 font-semibold mb-4">资金增长曲线 (Equity Curve)</h3>
+                    <div id="equityChart" class="w-full h-full"></div>
+                </div>
+
+                <div class="col-span-4 bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg h-96">
+                    <h3 class="text-gray-300 font-semibold mb-4">品种表现分布</h3>
+                    <div id="pieChart" class="w-full h-full"></div>
+                </div>
+            </div>
+
+            <div v-show="currentView === 'journal'" class="bg-gray-800 rounded-xl border border-gray-700 shadow-lg overflow-hidden">
+                <div class="p-4 border-b border-gray-700 flex gap-4">
+                    <input v-model="filters.symbol" placeholder="搜索品种 (如 BTC)..." class="bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white outline-none focus:border-blue-500">
+                    <select v-model="filters.status" class="bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white outline-none">
+                        <option value="">所有状态</option>
+                        <option value="WIN">盈利 (Win)</option>
+                        <option value="LOSS">亏损 (Loss)</option>
+                        <option value="OPEN">持仓中 (Open)</option>
+                    </select>
+                </div>
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="text-gray-400 text-xs uppercase bg-gray-700/50">
+                            <th class="p-4 font-medium">日期</th>
+                            <th class="p-4 font-medium">品种</th>
+                            <th class="p-4 font-medium">方向</th>
+                            <th class="p-4 font-medium text-right">入场价</th>
+                            <th class="p-4 font-medium text-right">出场价</th>
+                            <th class="p-4 font-medium text-center">R:R</th>
+                            <th class="p-4 font-medium text-right">盈亏($)</th>
+                            <th class="p-4 font-medium text-center">状态</th>
+                            <th class="p-4 font-medium">策略/备注</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700 text-sm">
+                        <tr v-for="trade in filteredTrades" :key="trade.id" class="hover:bg-gray-700/30 transition">
+                            <td class="p-4 text-gray-300">{{ trade.date }}</td>
+                            <td class="p-4 font-bold text-blue-400">{{ trade.symbol }}</td>
+                            <td class="p-4">
+                                <span :class="trade.direction === 'Long' ? 'text-tradeWin bg-green-900/20' : 'text-tradeLoss bg-red-900/20'" class="px-2 py-1 rounded text-xs font-bold border border-opacity-20" :class="trade.direction === 'Long' ? 'border-green-500' : 'border-red-500'">
+                                    {{ trade.direction.toUpperCase() }}
+                                </span>
+                            </td>
+                            <td class="p-4 text-right number-font">{{ trade.entry }}</td>
+                            <td class="p-4 text-right number-font">{{ trade.exit || '-' }}</td>
+                            <td class="p-4 text-center number-font">{{ trade.rr }}R</td>
+                            <td class="p-4 text-right font-bold number-font" :class="trade.pl > 0 ? 'text-tradeWin' : (trade.pl < 0 ? 'text-tradeLoss' : 'text-gray-400')">
+                                {{ trade.pl > 0 ? '+' : '' }}{{ trade.pl }}
+                            </td>
+                            <td class="p-4 text-center">
+                                <span v-if="trade.status === 'WIN'" class="text-tradeWin"><i class="fa-solid fa-check-circle"></i> Win</span>
+                                <span v-else-if="trade.status === 'LOSS'" class="text-tradeLoss"><i class="fa-solid fa-times-circle"></i> Loss</span>
+                                <span v-else class="text-yellow-500"><i class="fa-solid fa-clock"></i> Open</span>
+                            </td>
+                            <td class="p-4 text-gray-400 text-xs max-w-xs truncate">{{ trade.strategy }} - {{ trade.notes }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div v-show="currentView === 'kanban'" class="flex gap-6 h-full overflow-x-auto">
+                <div v-for="col in kanbanColumns" :key="col.id" class="w-80 flex-shrink-0 bg-gray-800 rounded-xl border border-gray-700 flex flex-col h-full">
+                    <div class="p-4 border-b border-gray-700 flex justify-between items-center">
+                        <h3 class="font-bold text-gray-200">{{ col.title }}</h3>
+                        <span class="bg-gray-700 px-2 py-0.5 rounded text-xs text-gray-300">{{ getKanbanCount(col.id) }}</span>
+                    </div>
+                    <div class="p-4 space-y-3 overflow-y-auto flex-1 bg-gray-900/50">
+                        <div v-for="card in getKanbanTrades(col.id)" :key="card.id" class="bg-gray-800 p-4 rounded border border-gray-600 hover:border-blue-500 cursor-pointer shadow-sm group relative">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="font-bold text-blue-400">{{ card.symbol }}</span>
+                                <span class="text-xs px-1.5 py-0.5 rounded" :class="card.direction==='Long'?'bg-green-900 text-green-300':'bg-red-900 text-red-300'">{{ card.direction }}</span>
+                            </div>
+                            <div class="text-xs text-gray-400 mb-2">{{ card.strategy }}</div>
+                            <div class="flex justify-between text-xs font-mono text-gray-300">
+                                <span>EP: {{ card.entry }}</span>
+                                <span>RR: {{ card.rr }}</span>
+                            </div>
+                            <div class="mt-3 pt-2 border-t border-gray-700 flex justify-end space-x-2 opacity-20 group-hover:opacity-100 transition">
+                                <button @click="moveKanban(card, 'next')" class="text-xs bg-blue-600 px-2 py-1 rounded text-white">Next Step &rarr;</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-show="currentView === 'analytics'" class="text-center py-20">
+                <i class="fa-solid fa-flask text-6xl text-gray-700 mb-4"></i>
+                <h3 class="text-2xl font-bold text-gray-500">更多高级统计分析功能开发中...</h3>
+                <p class="text-gray-600 mt-2">包含：持仓时间分析、最大连续亏损分析、日历热力图等。</p>
+            </div>
+            
+        </div>
+    </main>
+
+    <div v-if="showAddModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
+        <div class="bg-gray-800 w-full max-w-2xl rounded-xl border border-gray-700 shadow-2xl p-6 relative">
+            <button @click="showAddModal = false" class="absolute top-4 right-4 text-gray-400 hover:text-white"><i class="fa-solid fa-times text-xl"></i></button>
+            
+            <h2 class="text-xl font-bold text-white mb-6">记录新交易 / 制定计划</h2>
+            
+            <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">品种 (Symbol)</label>
+                        <input v-model="newTrade.symbol" type="text" placeholder="e.g. BTCUSDT" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:border-blue-500 uppercase">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">方向 (Direction)</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" value="Long" v-model="newTrade.direction" class="mr-2"> 做多 (Long)
+                            </label>
+                            <label class="flex items-center cursor-pointer">
+                                <input type="radio" value="Short" v-model="newTrade.direction" class="mr-2"> 做空 (Short)
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">状态 (Status)</label>
+                        <select v-model="newTrade.status" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white">
+                            <option value="WATCH">观察中 (Watchlist)</option>
+                            <option value="OPEN">持仓中 (Open)</option>
+                            <option value="WIN">盈利平仓 (Win)</option>
+                            <option value="LOSS">亏损平仓 (Loss)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="space-y-4 bg-gray-900/50 p-4 rounded border border-gray-700 border-dashed">
+                    <div>
+                        <label class="block text-xs text-gray-400 mb-1">入场价格 (Entry Price)</label>
+                        <input v-model.number="newTrade.entry" type="number" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white number-font">
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="w-1/2">
+                            <label class="block text-xs text-gray-400 mb-1">止损 (Stop Loss)</label>
+                            <input v-model.number="newTrade.sl" type="number" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white number-font text-red-400">
+                        </div>
+                        <div class="w-1/2">
+                            <label class="block text-xs text-gray-400 mb-1">止盈 (Take Profit)</label>
+                            <input v-model.number="newTrade.tp" type="number" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white number-font text-green-400">
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center pt-2 border-t border-gray-700">
+                        <span class="text-xs text-gray-400">预计盈亏比 (R:R):</span>
+                        <span class="font-bold text-xl number-font" :class="calculatedRR >= 2 ? 'text-tradeWin' : 'text-yellow-500'">{{ calculatedRR }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 space-y-4">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">策略与笔记 (Strategy & Notes)</label>
+                    <textarea v-model="newTrade.notes" rows="3" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-sm" placeholder="记录入场理由、情绪状态..."></textarea>
+                </div>
+            </div>
+
+            <div class="mt-8 flex justify-end gap-4">
+                <button @click="showAddModal = false" class="px-6 py-2 rounded text-gray-400 hover:text-white transition">取消</button>
+                <button @click="saveTrade" class="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-bold shadow-lg transition">保存记录</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted, watch } = Vue;
+
+    createApp({
+        setup() {
+            // 状态管理
+            const currentView = ref('dashboard');
+            const showAddModal = ref(false);
+            const accountBalance = ref(100000); // 初始资金
+            const filters = ref({ symbol: '', status: '' });
+            
+            // 模拟数据 (交易记录)
+            const trades = ref([
+                { id: 1, date: '2023-10-01', symbol: 'BTCUSDT', direction: 'Long', entry: 26500, sl: 26000, tp: 27500, exit: 27500, rr: 2.0, pl: 500, status: 'WIN', strategy: 'Trend Following', notes: 'EMA support bounce' },
+                { id: 2, date: '2023-10-02', symbol: 'ETHUSDT', direction: 'Short', entry: 1650, sl: 1680, tp: 1600, exit: 1680, rr: 1.6, pl: -150, status: 'LOSS', strategy: 'Breakout Failure', notes: 'Entered too early, fomo' },
+                { id: 3, date: '2023-10-05', symbol: 'SOLUSDT', direction: 'Long', entry: 23.50, sl: 22.80, tp: 25.00, exit: null, rr: 2.14, pl: 0, status: 'OPEN', strategy: 'Support Retest', notes: 'Holding strong' },
+                { id: 4, date: '2023-10-06', symbol: 'XAUUSD', direction: 'Short', entry: 1920, sl: 1925, tp: 1900, exit: 1900, rr: 4.0, pl: 800, status: 'WIN', strategy: 'Supply Zone', notes: 'Perfect execution' },
+                { id: 5, date: '2023-10-08', symbol: 'EURUSD', direction: 'Long', entry: 1.0500, sl: 1.0480, tp: 1.0550, exit: 1.0480, rr: 2.5, pl: -100, status: 'LOSS', strategy: 'News Trade', notes: 'Stopped out by volatility' },
+            ]);
+
+            // 看板配置
+            const kanbanColumns = [
+                { id: 'WATCH', title: '👀 观察列表 (Watchlist)' },
+                { id: 'OPEN', title: '🚀 持仓中 (Open)' },
+                { id: 'WIN', title: '✅ 盈利结案 (Winners)' },
+                { id: 'LOSS', title: '❌ 亏损结案 (Losers)' }
+            ];
+
+            // 新交易表单数据
+            const newTrade = ref({
+                symbol: '', direction: 'Long', entry: null, sl: null, tp: null, status: 'WATCH', notes: ''
+            });
+
+            // --- 计算属性 ---
+
+            // 过滤后的交易列表
+            const filteredTrades = computed(() => {
+                return trades.value.filter(t => {
+                    const matchSymbol = t.symbol.toLowerCase().includes(filters.value.symbol.toLowerCase());
+                    const matchStatus = filters.value.status ? t.status === filters.value.status : true;
+                    return matchSymbol && matchStatus;
+                });
+            });
+
+            // 仪表盘数据
+            const winRate = computed(() => {
+                const closedTrades = trades.value.filter(t => t.status === 'WIN' || t.status === 'LOSS');
+                if (closedTrades.length === 0) return 0;
+                const wins = closedTrades.filter(t => t.status === 'WIN').length;
+                return Math.round((wins / closedTrades.length) * 100);
+            });
+
+            const avgRR = computed(() => {
+                const total = trades.value.reduce((acc, curr) => acc + (parseFloat(curr.rr) || 0), 0);
+                return (total / trades.value.length).toFixed(2);
+            });
+
+            const monthlyPL = computed(() => {
+                return trades.value.reduce((acc, curr) => acc + (parseFloat(curr.pl) || 0), 0);
+            });
+
+            // 动态计算盈亏比 (Add Modal)
+            const calculatedRR = computed(() => {
+                if (!newTrade.value.entry || !newTrade.value.sl || !newTrade.value.tp) return 0;
+                const risk = Math.abs(newTrade.value.entry - newTrade.value.sl);
+                const reward = Math.abs(newTrade.value.tp - newTrade.value.entry);
+                if (risk === 0) return 0;
+                return (reward / risk).toFixed(2);
+            });
+
+            const viewName = computed(() => {
+                const names = { 'dashboard': '交易仪表盘', 'journal': '历史交易日志', 'kanban': '交易计划看板', 'analytics': '高级统计' };
+                return names[currentView.value];
+            });
+
+            // --- 方法 ---
+
+            const formatNumber = (num) => {
+                return new Intl.NumberFormat().format(num);
+            };
+
+            const getKanbanTrades = (status) => {
+                // 简单的映射：WIN/LOSS都在历史，WATCH和OPEN是活跃的
+                // 为了演示，我们将直接匹配 status
+                return trades.value.filter(t => t.status === status);
+            };
+            
+            const getKanbanCount = (status) => getKanbanTrades(status).length;
+
+            const moveKanban = (trade, action) => {
+                // 简单的状态流转模拟
+                if(trade.status === 'WATCH') trade.status = 'OPEN';
+                else if(trade.status === 'OPEN') trade.status = 'WIN'; // 默认演示流转
+            };
+
+            const saveTrade = () => {
+                const tradeData = {
+                    id: Date.now(),
+                    date: new Date().toISOString().split('T')[0],
+                    ...newTrade.value,
+                    rr: calculatedRR.value,
+                    pl: 0 // 默认为0，实际应根据exit计算
+                };
+                trades.value.unshift(tradeData);
+                showAddModal.value = false;
+                // 重置表单
+                newTrade.value = { symbol: '', direction: 'Long', entry: null, sl: null, tp: null, status: 'WATCH', notes: '' };
+                initCharts(); // 刷新图表
+            };
+
+            // --- 图表初始化 ---
+            const initCharts = () => {
+                // 1. 资金曲线
+                const chartDom = document.getElementById('equityChart');
+                if(!chartDom) return;
+                const myChart = echarts.init(chartDom);
+                
+                // 生成累积盈亏数据
+                let balance = 100000;
+                const data = trades.value.slice().reverse().map(t => {
+                    balance += (t.pl || 0);
+                    return balance;
+                });
+                const dates = trades.value.slice().reverse().map(t => t.date);
+
+                myChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'axis' },
+                    grid: { top: 20, right: 20, bottom: 20, left: 50, containLabel: true },
+                    xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#475569' } } },
+                    yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#94a3b8' } },
+                    series: [{
+                        data: data,
+                        type: 'line',
+                        smooth: true,
+                        lineStyle: { color: '#3b82f6', width: 3 },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(59, 130, 246, 0.5)' },
+                                { offset: 1, color: 'rgba(59, 130, 246, 0.0)' }
+                            ])
+                        }
+                    }]
+                });
+
+                // 2. 饼图
+                const pieDom = document.getElementById('pieChart');
+                if(pieDom) {
+                    const pieChart = echarts.init(pieDom);
+                    const winCount = trades.value.filter(t => t.status === 'WIN').length;
+                    const lossCount = trades.value.filter(t => t.status === 'LOSS').length;
+                    
+                    pieChart.setOption({
+                        backgroundColor: 'transparent',
+                        tooltip: { trigger: 'item' },
+                        legend: { bottom: '0%', textStyle: { color: '#ccc' } },
+                        series: [{
+                            name: '交易结果',
+                            type: 'pie',
+                            radius: ['40%', '70%'],
+                            avoidLabelOverlap: false,
+                            itemStyle: { borderRadius: 10, borderColor: '#1f2937', borderWidth: 2 },
+                            label: { show: false },
+                            data: [
+                                { value: winCount, name: 'Win', itemStyle: { color: '#10b981' } },
+                                { value: lossCount, name: 'Loss', itemStyle: { color: '#ef4444' } },
+                                { value: trades.value.length - winCount - lossCount, name: 'Open', itemStyle: { color: '#eab308' } }
+                            ]
+                        }]
+                    });
+                }
+            };
+
+            // 监听视图切换以重绘图表
+            watch(currentView, (newVal) => {
+                if(newVal === 'dashboard') {
+                    setTimeout(initCharts, 100);
+                }
+            });
+
+            onMounted(() => {
+                initCharts();
+                window.addEventListener('resize', () => {
+                    echarts.getInstanceByDom(document.getElementById('equityChart'))?.resize();
+                    echarts.getInstanceByDom(document.getElementById('pieChart'))?.resize();
+                });
+            });
+
+            return {
+                currentView, trades, filteredTrades, winRate, avgRR, monthlyPL, accountBalance,
+                kanbanColumns, getKanbanTrades, getKanbanCount, moveKanban, viewName,
+                showAddModal, newTrade, calculatedRR, saveTrade, filters, formatNumber
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
